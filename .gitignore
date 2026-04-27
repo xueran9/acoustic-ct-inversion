@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.streamlit_history/
+.DS_Store
+*.tmp
+*.docx
+衍射代码
+视频
+新文本框代码/
