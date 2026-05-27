@@ -16,12 +16,15 @@ from scipy.ndimage import gaussian_filter
 import streamlit as st
 
 # 项目模块
-from core.physics import gen_phantom, forward_proj
+from core.physics import (gen_phantom, gen_phantom_simple, gen_phantom_complex,
+                            gen_phantom_layered, gen_phantom_tumor, gen_phantom_custom, forward_proj)
 from core.model import Net
 from core.analyzer import DataAnalyzer
 from core.assistant import AIAssistant
 from core.collector import WaveCollector
 from core.wave_generator import generate_acoustic_wave
+from core.lab_equipment import (WAVE_SOURCES, SENSOR_ARRAYS, PHANTOM_TYPES,
+                                compute_equipment_effects, get_equipment_summary, build_acoustic_params)
 
 
 # ====================================================================
@@ -481,7 +484,7 @@ with st.sidebar:
 # 主页面 — 4个标签页
 # ====================================================================
 st.title("🔬 AI驱动声波CT反演实验系统")
-tabs = st.tabs(["CT反演实验", "声波输入口", "实验数据分析", "AI实验助手"])
+tabs = st.tabs(["CT反演实验", "声波输入口", "实验数据分析", "AI实验助手", "虚拟实验室"])
 
 # ================================
 # Tab 1: CT反演实验
@@ -863,6 +866,197 @@ with tabs[3]:
         st.session_state.chat_history_msgs.append({"role": "assistant", "content": response})
         st.rerun()
 
+
+# ================================
+# Tab 5: 虚拟实验室
+# ================================
+with tabs[4]:
+    st.markdown("### 🔬 虚拟实验室 — 器材选择与实验数据生成")
+    st.caption("选择实验器材组合，一键生成配套实验数据。生成的数据可应用于CT反演实验流水线。")
+
+    # ---- Session State 初始化 ----
+    if "lab_phantom" not in st.session_state:
+        st.session_state.lab_phantom = None
+    if "lab_wave" not in st.session_state:
+        st.session_state.lab_wave = None
+    if "lab_sino" not in st.session_state:
+        st.session_state.lab_sino = None
+    if "lab_effects" not in st.session_state:
+        st.session_state.lab_effects = None
+    if "lab_summary" not in st.session_state:
+        st.session_state.lab_summary = ""
+
+    # ---- 三列器材选择 ----
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("#### 📡 波源选择")
+        wave_source = st.radio("波源类型",
+            list(WAVE_SOURCES.keys()),
+            format_func=lambda x: f"{WAVE_SOURCES[x]['icon']} {x}",
+            key="lab_wave_source")
+        ws_info = WAVE_SOURCES[wave_source]
+        st.caption(ws_info["description"])
+
+        # 波源参数
+        freq_min, freq_max = ws_info["freq_range"]
+        freq_default = ws_info["freq_default"]
+        lab_freq = st.slider("频率 (kHz)",
+            min_value=int(freq_min/1000), max_value=int(freq_max/1000),
+            value=int(freq_default/1000), step=max(1, int((freq_max-freq_min)/20000)),
+            key="lab_freq")
+        lab_freq_hz = lab_freq * 1000
+        lab_voltage = st.slider("激励电压 (V)", min_value=0.5, max_value=10.0, value=1.0, step=0.5, key="lab_voltage")
+        st.metric("信噪比因子", f"{ws_info['snr_factor']*100:.0f}%",
+                  delta="稳定" if ws_info['stability'] == '高' else ("中等" if ws_info['stability'] == '中' else "较低"),
+                  delta_color="off")
+
+    with col2:
+        st.markdown("#### 📊 传感器阵列")
+        sensor_array = st.radio("阵列类型",
+            list(SENSOR_ARRAYS.keys()),
+            format_func=lambda x: f"{SENSOR_ARRAYS[x]['icon']} {x}",
+            key="lab_sensor")
+        sa_info = SENSOR_ARRAYS[sensor_array]
+        st.caption(sa_info["description"])
+
+        st.metric("投影角度数", str(sa_info["na"]), delta="全周" if sa_info["scan_angle"] == 360 else f"{sa_info['scan_angle']}°扇扫")
+        st.metric("探测器通道", str(sa_info["ns"]))
+        st.metric("几何类型", sa_info["geometry"])
+
+    with col3:
+        st.markdown("#### 🧫 体模类型")
+        phantom_type = st.radio("体模类型",
+            list(PHANTOM_TYPES.keys()),
+            format_func=lambda x: f"{PHANTOM_TYPES[x]['icon']} {x}",
+            key="lab_phantom_type")
+        pt_info = PHANTOM_TYPES[phantom_type]
+        st.caption(pt_info["description"])
+
+        st.metric("异常区数量", str(pt_info["anomaly_count"]))
+
+        # 自定义体模参数
+        if phantom_type == "自定义体模":
+            st.markdown("**自定义异常区：**")
+            custom_anoms = []
+            for i in range(3):
+                with st.expander(f"异常区 #{i+1}", expanded=(i == 0)):
+                    ea = st.checkbox(f"启用异常区 #{i+1}", value=(i == 0), key=f"lab_ea_enable_{i}")
+                    if ea:
+                        cx = st.slider("中心X", -1.0, 1.0, 0.0, 0.1, key=f"lab_ea_cx_{i}")
+                        cy = st.slider("中心Y", -1.0, 1.0, 0.0, 0.1, key=f"lab_ea_cy_{i}")
+                        rad = st.slider("半径", 0.05, 0.4, 0.15, 0.05, key=f"lab_ea_r_{i}")
+                        spd = st.slider("声速 (m/s)", 1300, 1700, 1600, 10, key=f"lab_ea_spd_{i}")
+                        custom_anoms.append((cx, cy, rad, spd))
+
+    st.markdown("---")
+
+    # ---- 操作按钮 ----
+    btn_cols = st.columns([1, 1, 4])
+    with btn_cols[0]:
+        if st.button("🎲 生成实验数据", use_container_width=True, type="primary"):
+            with st.spinner("正在根据设备参数生成实验数据..."):
+                # 生成体模
+                pt_func = PHANTOM_TYPES[phantom_type]["func"]
+                if pt_func == "simple":
+                    st.session_state.lab_phantom = gen_phantom_simple(64)
+                elif pt_func == "complex":
+                    st.session_state.lab_phantom = gen_phantom_complex(64, seed=np.random.randint(0, 10000))
+                elif pt_func == "layered":
+                    st.session_state.lab_phantom = gen_phantom_layered(64)
+                elif pt_func == "tumor":
+                    st.session_state.lab_phantom = gen_phantom_tumor(64)
+                elif pt_func == "custom":
+                    st.session_state.lab_phantom = gen_phantom_custom(64, custom_anoms if custom_anoms else None)
+
+                # 计算设备效果
+                st.session_state.lab_effects = compute_equipment_effects(
+                    wave_source, sensor_array, lab_freq_hz, lab_voltage)
+
+                # 构建声波参数
+                acoustic_params = build_acoustic_params(wave_source, lab_freq_hz, lab_voltage)
+
+                # 计算投影
+                st.session_state.lab_sino = forward_proj(
+                    st.session_state.lab_phantom,
+                    na=st.session_state.lab_effects["na"],
+                    ns=st.session_state.lab_effects["ns"],
+                    acoustic_params=acoustic_params)
+
+                # 生成摘要
+                st.session_state.lab_summary = get_equipment_summary(
+                    wave_source, sensor_array, phantom_type, lab_freq_hz, lab_voltage)
+
+                # 生成波形预览
+                wtype = acoustic_params['wave_type']
+                t, wave = generate_acoustic_wave(lab_freq_hz, lab_voltage, 0.004, wtype)
+                st.session_state.lab_wave = (t, wave)
+
+            st.success("实验数据已生成！")
+            st.rerun()
+
+    with btn_cols[1]:
+        has_lab_data = st.session_state.lab_sino is not None
+        if st.button("📤 应用数据到实验流水线", use_container_width=True, disabled=not has_lab_data):
+            # 将虚拟实验室数据写入实验流水线
+            st.session_state.v_true = st.session_state.lab_phantom
+            st.session_state.sino = st.session_state.lab_sino
+            st.session_state.wave_freq_val = lab_freq_hz
+            st.session_state.wave_amp_val = lab_voltage
+            ws_info2 = WAVE_SOURCES[wave_source]
+            st.session_state.wave_type_val = ws_info2["wave_type"]
+            st.session_state.analyzer.set_phantom(st.session_state.lab_phantom)
+            st.session_state.analyzer.set_sino(st.session_state.lab_sino, build_acoustic_params(wave_source, lab_freq_hz, lab_voltage))
+            # 重置流水线步骤
+            for s in st.session_state.pipeline_steps:
+                s["state"] = "pending"
+            st.session_state.pipeline_steps[0]["state"] = "completed"
+            st.session_state.pipeline_steps[1]["state"] = "completed"
+            st.session_state.vp = None
+            st.session_state.loss_history = []
+            st.session_state.status_message = "已加载虚拟实验室数据，请执行AI反演（第3步）"
+            st.success("数据已加载到实验流水线！切换到「CT反演实验」标签页继续。")
+            st.rerun()
+
+    # ---- 数据预览区 ----
+    if st.session_state.lab_sino is not None:
+        st.markdown("---")
+        st.markdown("### 📊 实验数据预览")
+
+        preview_cols = st.columns(3)
+
+        with preview_cols[0]:
+            if st.session_state.lab_phantom is not None:
+                fig = make_fig_phantom(st.session_state.lab_phantom)
+                fig.axes[0].set_title(f"声速场: {phantom_type}", fontsize=10)
+                st.pyplot(fig); plt.close(fig)
+
+        with preview_cols[1]:
+            if st.session_state.lab_sino is not None:
+                fig = make_fig_sino(st.session_state.lab_sino)
+                fig.axes[0].set_title(f"投影: {sensor_array}", fontsize=10)
+                st.pyplot(fig); plt.close(fig)
+
+        with preview_cols[2]:
+            if st.session_state.lab_wave is not None:
+                t, wave = st.session_state.lab_wave
+                fig = make_fig_waveform(t, wave, f"波形: {wave_source} {lab_freq}kHz")
+                st.pyplot(fig); plt.close(fig)
+
+        # 统计指标
+        stat_cols = st.columns(4)
+        eff = st.session_state.lab_effects
+        if eff:
+            stat_cols[0].metric("信噪比", f"{eff['snr_db']:.1f} dB")
+            stat_cols[1].metric("分辨率", f"{eff['resolution_mm']:.2f} mm")
+            stat_cols[2].metric("数据量", f"{eff['na']}×{eff['ns']}")
+            stat_cols[3].metric("衰减系数", f"{eff['attenuation_factor']:.4f}")
+
+        # 设备配置摘要
+        with st.expander("📋 设备配置详细报告"):
+            st.code(st.session_state.lab_summary, language=None)
+    else:
+        st.info("👆 选择器材并点击「生成实验数据」开始。")
 
 # ====================================================================
 # 底部
