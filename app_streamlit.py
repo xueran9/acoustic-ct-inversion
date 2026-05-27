@@ -84,7 +84,7 @@ def init_session_state():
     if "initialized" in st.session_state:
         return
 
-    st.session_state.size = 64
+    st.session_state.size = 128
     st.session_state.net = None
     st.session_state.v_true = None
     st.session_state.sino = None
@@ -150,27 +150,34 @@ def get_acoustic_params():
 # ---- Matplotlib 图表工厂 ----
 def make_fig_phantom(v_true):
     fig, ax = plt.subplots(figsize=(4, 4))
-    im = ax.imshow(v_true, cmap='jet', origin='lower', extent=[-1, 1, -1, 1])
-    ax.set_title("真实声速场", fontsize=11)
-    ax.set_xlabel("x"); ax.set_ylabel("y")
-    plt.colorbar(im, ax=ax, fraction=0.046, label='m/s')
+    vmin, vmax = 1350, 1700
+    im = ax.imshow(v_true, cmap='RdYlBu_r', origin='lower', extent=[-1, 1, -1, 1],
+                   interpolation='bilinear', vmin=vmin, vmax=vmax)
+    ax.set_title("真实声速场", fontsize=11, fontweight='bold')
+    ax.set_xlabel("x (归一化坐标)"); ax.set_ylabel("y (归一化坐标)")
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, label='声速 (m/s)')
+    cbar.set_ticks([1400, 1450, 1500, 1550, 1600])
     fig.tight_layout()
     return fig
 
 def make_fig_sino(sino):
     fig, ax = plt.subplots(figsize=(4, 4))
-    ax.imshow(sino, cmap='gray', aspect='auto', extent=[0, 180, -1, 1])
-    ax.set_title("声波投影Sinogram", fontsize=11)
-    ax.set_xlabel("角度 (°)"); ax.set_ylabel("探测器位置")
+    ax.imshow(sino, cmap='gray', aspect='auto', extent=[0, 180, -1, 1],
+              interpolation='bilinear')
+    ax.set_title("声波投影 Sinogram", fontsize=11, fontweight='bold')
+    ax.set_xlabel("投影角度 (°)"); ax.set_ylabel("探测器位置 (归一化)")
     fig.tight_layout()
     return fig
 
 def make_fig_inversion(vp):
     fig, ax = plt.subplots(figsize=(4, 4))
-    im = ax.imshow(vp, cmap='jet', origin='lower', extent=[-1, 1, -1, 1])
-    ax.set_title("AI反演结果", fontsize=11)
-    ax.set_xlabel("x"); ax.set_ylabel("y")
-    plt.colorbar(im, ax=ax, fraction=0.046, label='m/s')
+    vmin, vmax = 1350, 1700
+    im = ax.imshow(vp, cmap='RdYlBu_r', origin='lower', extent=[-1, 1, -1, 1],
+                   interpolation='bilinear', vmin=vmin, vmax=vmax)
+    ax.set_title("AI反演结果", fontsize=11, fontweight='bold')
+    ax.set_xlabel("x (归一化坐标)"); ax.set_ylabel("y (归一化坐标)")
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, label='声速 (m/s)')
+    cbar.set_ticks([1400, 1450, 1500, 1550, 1600])
     fig.tight_layout()
     return fig
 
@@ -181,8 +188,8 @@ def make_fig_loss(loss_history):
         ax.scatter(len(loss_history)-1, loss_history[-1], color='#dc2626', s=30, zorder=5,
                    label=f'终值: {loss_history[-1]:.6f}')
         ax.legend(fontsize=8)
-    ax.set_title(f"训练损失曲线 (Epochs={len(loss_history)})", fontsize=10)
-    ax.set_xlabel("训练轮数"); ax.set_ylabel("损失值")
+    ax.set_title(f"训练损失曲线 (Epochs={len(loss_history)})", fontsize=10, fontweight='bold')
+    ax.set_xlabel("训练轮数 (Epoch)"); ax.set_ylabel("损失值 (MSE Loss)")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     return fig
@@ -190,12 +197,14 @@ def make_fig_loss(loss_history):
 def make_fig_error(vp, v_true):
     fig, ax = plt.subplots(figsize=(4, 3))
     err = vp - v_true
-    vmax = max(abs(np.min(err)), abs(np.max(err))) or 1
-    im = ax.imshow(err, cmap='RdBu_r', origin='lower', vmin=-vmax, vmax=vmax)
-    fig.colorbar(im, ax=ax, fraction=0.046, label='m/s')
-    rmse = np.sqrt(np.mean(err**2))
-    ax.set_title(f"反演误差  RMSE={rmse:.1f} m/s", fontsize=10)
-    ax.set_xlabel("x / pixel"); ax.set_ylabel("y / pixel")
+    vmax = max(abs(np.nanmin(err)), abs(np.nanmax(err))) or 1
+    im = ax.imshow(err, cmap='RdBu_r', origin='lower', vmin=-vmax, vmax=vmax,
+                   interpolation='bilinear')
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, label='声速偏差 (m/s)')
+    cbar.set_ticks([-vmax, -vmax/2, 0, vmax/2, vmax])
+    rmse = np.sqrt(np.nanmean(err**2))
+    ax.set_title(f"反演误差图  RMSE={rmse:.1f} m/s", fontsize=10, fontweight='bold')
+    ax.set_xlabel("x (像素)"); ax.set_ylabel("y (像素)")
     fig.tight_layout()
     return fig
 
@@ -1252,15 +1261,15 @@ with tabs[4]:
                 # 生成体模
                 pt_func = PHANTOM_TYPES[phantom_type]["func"]
                 if pt_func == "simple":
-                    st.session_state.lab_phantom = gen_phantom_simple(64)
+                    st.session_state.lab_phantom = gen_phantom_simple(st.session_state.size)
                 elif pt_func == "complex":
-                    st.session_state.lab_phantom = gen_phantom_complex(64, seed=np.random.randint(0, 10000))
+                    st.session_state.lab_phantom = gen_phantom_complex(st.session_state.size, seed=np.random.randint(0, 10000))
                 elif pt_func == "layered":
-                    st.session_state.lab_phantom = gen_phantom_layered(64)
+                    st.session_state.lab_phantom = gen_phantom_layered(st.session_state.size)
                 elif pt_func == "tumor":
-                    st.session_state.lab_phantom = gen_phantom_tumor(64)
+                    st.session_state.lab_phantom = gen_phantom_tumor(st.session_state.size)
                 elif pt_func == "custom":
-                    st.session_state.lab_phantom = gen_phantom_custom(64, custom_anoms if custom_anoms else None)
+                    st.session_state.lab_phantom = gen_phantom_custom(st.session_state.size, custom_anoms if custom_anoms else None)
 
                 st.session_state.lab_effects = compute_equipment_effects(
                     wave_source, sensor_array, lab_freq_hz, lab_voltage)
