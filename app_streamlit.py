@@ -200,7 +200,7 @@ def make_fig_error(vp, v_true):
     return fig
 
 def make_fig_lab_schematic(wave_source, phantom_type, sensor_array, connected, phantom_data=None):
-    """绘制实验台示意图：波源→体模→传感器 的信号链路"""
+    """绘制实验台工程示意图：用几何图形还原真实超声CT设备外观"""
     fig, ax = plt.subplots(figsize=(10, 2.8))
     ax.set_xlim(0, 10); ax.set_ylim(0, 3)
     ax.axis('off')
@@ -211,52 +211,95 @@ def make_fig_lab_schematic(wave_source, phantom_type, sensor_array, connected, p
     phantom_color = '#2563eb' if phantom_data is not None else '#9ca3af'
     sensor_color = '#7c3aed' if phantom_data is not None else '#9ca3af'
 
-    # ---- 波源 ----
-    src_rect = plt.Rectangle((0.4, 0.6), 1.6, 1.8, facecolor='white', edgecolor=src_color, linewidth=3, zorder=2, clip_on=False)
-    ax.add_patch(src_rect)
-    ax.text(1.2, 2.05, '📡', fontsize=32, ha='center', zorder=3)
-    ax.text(1.2, 1.6, '波源', fontsize=11, ha='center', fontweight='bold', color='#1a1a2e', zorder=3)
-    ax.text(1.2, 1.3, wave_source, fontsize=8, ha='center', color='#6b7280', zorder=3)
-    status_src = '🟢 已连接' if connected else '⚪ 待机'
-    ax.text(1.2, 0.85, status_src, fontsize=8, ha='center', color=src_color, fontweight='bold', zorder=3)
+    # ========== 波源 — 压电换能器探头 ==========
+    # 探头顶部（接触面）
+    probe_head = plt.Rectangle((0.9, 1.6), 0.6, 0.3, facecolor='#c0c0c0', edgecolor='#555', linewidth=1.5, zorder=3)
+    ax.add_patch(probe_head)
+    ax.text(1.2, 1.75, '探\n头', fontsize=5, ha='center', va='center', color='#333', zorder=4, fontweight='bold')
+    # 探头体（外壳）
+    probe_body = plt.Rectangle((0.95, 1.0), 0.5, 0.6, facecolor='#d4d4d8', edgecolor='#555', linewidth=1.5, zorder=3)
+    ax.add_patch(probe_body)
+    # 连接线缆
+    ax.plot([1.2, 0.4], [1.0, 0.4], color='#333', lw=2, zorder=2)
+    ax.plot([0.4, 0.3], [0.4, 0.35], color='#333', lw=2, zorder=2)
+    # 线缆端口
+    cable_conn = plt.Circle((0.3, 0.35), 0.08, facecolor='#666', edgecolor='#333', linewidth=1, zorder=3)
+    ax.add_patch(cable_conn)
+    # 超声耦合剂（绿色半透明）
+    coupling = plt.Rectangle((1.5, 1.55), 0.15, 0.4, facecolor='#a3e635', alpha=0.4, zorder=2)
+    ax.add_patch(coupling)
+    # 标签
+    ax.text(1.2, 2.1, '超声波换能器', fontsize=7, ha='center', fontweight='bold', color='#1a1a2e', zorder=5)
+    ax.text(1.2, 1.95, wave_source, fontsize=6, ha='center', color='#6b7280', zorder=5)
+    # 状态灯
+    dot = plt.Circle((1.2, 0.65), 0.08, facecolor=src_color, edgecolor='#555', linewidth=1, zorder=5)
+    ax.add_patch(dot)
+    ax.text(1.2, 0.45, '已连接' if connected else '待机', fontsize=6, ha='center', color=src_color, fontweight='bold', zorder=5)
 
-    # ---- 体模舱 ----
-    phantom_rect = plt.Rectangle((3.4, 0.6), 3.2, 1.8, facecolor='white', edgecolor=phantom_color, linewidth=3, zorder=2, clip_on=False)
-    ax.add_patch(phantom_rect)
-    ax.text(5.0, 2.05, '🧫', fontsize=32, ha='center', zorder=3)
-    ax.text(5.0, 1.6, '体模样本舱', fontsize=11, ha='center', fontweight='bold', color='#1a1a2e', zorder=3)
-    ax.text(5.0, 1.3, phantom_type, fontsize=8, ha='center', color='#6b7280', zorder=3)
+    # ========== 体模舱 — 圆柱形容器截面 ==========
+    # 外框（容器壁）
+    container = plt.Rectangle((3.5, 0.8), 3.0, 1.8, facecolor='white', edgecolor=phantom_color, linewidth=3, zorder=2)
+    ax.add_patch(container)
+    # 圆形样本槽
+    sample_circle = plt.Circle((5.0, 1.7), 0.55, facecolor='#f8fafc', edgecolor='#94a3b8', linewidth=1.5, zorder=3)
+    ax.add_patch(sample_circle)
+    ax.text(5.0, 1.7, '样本', fontsize=6, ha='center', va='center', color='#64748b', zorder=4)
+    # 异常区（如果已放置）
     if phantom_data is not None:
-        for i, c in enumerate(['#ef4444', '#f97316', '#3b82f6']):
-            rect = plt.Rectangle((4.0 + i * 1.0, 0.78), 0.6, 0.5, facecolor=c, alpha=0.3, zorder=4)
-            ax.add_patch(rect)
-        ax.text(5.0, 0.68, '✅ 已放置', fontsize=8, ha='center', color='#059669', fontweight='bold', zorder=5)
+        anom1 = plt.Circle((4.8, 1.8), 0.15, facecolor='#ef4444', alpha=0.4, edgecolor='#dc2626', linewidth=1, zorder=4)
+        ax.add_patch(anom1)
+        anom2 = plt.Circle((5.2, 1.55), 0.12, facecolor='#3b82f6', alpha=0.4, edgecolor='#2563eb', linewidth=1, zorder=4)
+        ax.add_patch(anom2)
+        ax.text(5.0, 0.75, '[OK] 已放置体模', fontsize=7, ha='center', color='#059669', fontweight='bold', zorder=5)
     else:
-        ax.text(5.0, 0.9, '等待放置体模...', fontsize=8, ha='center', color='#9ca3af', zorder=3)
+        ax.text(5.0, 0.75, '等待放置体模...', fontsize=7, ha='center', color='#9ca3af', zorder=5)
+    # 样本台
+    stage = plt.Rectangle((4.0, 0.82), 2.0, 0.06, facecolor='#d4d4d8', edgecolor='#555', linewidth=1, zorder=3)
+    ax.add_patch(stage)
+    # 标签
+    ax.text(5.0, 2.25, '体模样本舱', fontsize=7, ha='center', fontweight='bold', color='#1a1a2e', zorder=5)
+    ax.text(5.0, 2.1, phantom_type, fontsize=6, ha='center', color='#6b7280', zorder=5)
 
-    # ---- 传感器 ----
-    sensor_rect = plt.Rectangle((7.9, 0.6), 1.8, 1.8, facecolor='white', edgecolor=sensor_color, linewidth=3, zorder=2, clip_on=False)
-    ax.add_patch(sensor_rect)
-    ax.text(8.8, 2.05, '📊', fontsize=32, ha='center', zorder=3)
-    ax.text(8.8, 1.6, '传感器阵列', fontsize=11, ha='center', fontweight='bold', color='#1a1a2e', zorder=3)
-    ax.text(8.8, 1.3, sensor_array, fontsize=8, ha='center', color='#6b7280', zorder=3)
-    status_sensor = '🟢 已就绪' if phantom_data is not None else '⚪ 就绪中'
-    ax.text(8.8, 0.85, status_sensor, fontsize=8, ha='center', color=sensor_color, fontweight='bold', zorder=3)
+    # ========== 传感器阵列 — 线阵探头 ==========
+    # 阵列外壳
+    array_body = plt.Rectangle((8.0, 0.9), 1.6, 1.2, facecolor='white', edgecolor=sensor_color, linewidth=3, zorder=2)
+    ax.add_patch(array_body)
+    # 传感器元件（一排矩形）
+    for i in range(8):
+        sx = 8.15 + i * 0.18
+        elem = plt.Rectangle((sx, 1.0), 0.12, 0.8, facecolor='#cbd5e1', edgecolor='#64748b', linewidth=0.5, zorder=3)
+        ax.add_patch(elem)
+    # 信号线
+    for i in range(3):
+        ax.plot([8.95, 7.8], [0.7 - i*0.15, 0.7 - i*0.15], color='#94a3b8', lw=1, zorder=2)
+    # 采集盒
+    daq = plt.Rectangle((7.5, 0.4), 0.7, 0.5, facecolor='#f1f5f9', edgecolor='#64748b', linewidth=1.5, zorder=3)
+    ax.add_patch(daq)
+    ax.text(7.85, 0.65, 'DAQ', fontsize=6, ha='center', va='center', color='#334155', fontweight='bold', zorder=4)
+    # 状态灯
+    dot2 = plt.Circle((8.8, 2.25), 0.08, facecolor=sensor_color, edgecolor='#555', linewidth=1, zorder=5)
+    ax.add_patch(dot2)
+    # 标签
+    ax.text(8.8, 2.5, '传感器阵列', fontsize=7, ha='center', fontweight='bold', color='#1a1a2e', zorder=5)
+    ax.text(8.8, 2.38, sensor_array, fontsize=6, ha='center', color='#6b7280', zorder=5)
+    ax.text(8.8, 0.3, '已就绪' if phantom_data is not None else '等待中', fontsize=6, ha='center', color=sensor_color, fontweight='bold', zorder=5)
 
-    # ---- 箭头连接 ----
-    arr1_y = 1.5
-    ax.annotate('', xy=(3.3, arr1_y), xytext=(2.1, arr1_y),
-               arrowprops=dict(arrowstyle='->', color=src_color, lw=3))
-    ax.annotate('', xy=(7.8, arr1_y), xytext=(6.7, arr1_y),
-               arrowprops=dict(arrowstyle='->', color=phantom_color, lw=3))
+    # ========== 信号传播箭头 ==========
+    arr_y = 1.5
+    ax.annotate('', xy=(3.4, arr_y), xytext=(1.7, arr_y),
+               arrowprops=dict(arrowstyle='->', color=src_color, lw=3, connectionstyle='arc3,rad=0'))
+    ax.annotate('', xy=(7.9, arr_y), xytext=(6.6, arr_y),
+               arrowprops=dict(arrowstyle='->', color=phantom_color, lw=3, connectionstyle='arc3,rad=0'))
 
-    # ---- 声波示意 ----
+    # 波前弧线
     if connected:
+        from matplotlib.patches import Arc
         for i in range(3):
-            yp = 1.0 + i * 0.35
-            ax.plot([2.3, 3.1], [yp, yp], color='#2563eb', lw=1, alpha=0.3 + i*0.2, linestyle='--')
+            arc = Arc((1.7, 1.5 - 0.15 + i*0.15), 0.6, 0.3, angle=0, theta1=-30, theta2=30,
+                     color='#2563eb', lw=1, alpha=0.3 + i*0.25, zorder=1)
+            ax.add_patch(arc)
 
-    fig.tight_layout()
+    fig.tight_layout(pad=0.5)
     return fig
 
 
